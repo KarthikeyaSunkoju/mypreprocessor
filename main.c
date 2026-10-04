@@ -5,6 +5,7 @@
 int main(int argc, char *argv[])
 {
     char output_file[100];
+    char input_file[100];
     char *dot;
 
     if (argc != 2)
@@ -13,14 +14,16 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    dot = strrchr(argv[1], '.');
+    strcpy(input_file, argv[1]);
+
+    dot = strrchr(input_file, '.');
 
     if (dot != NULL)
     {
         *dot = '\0';
     }
 
-    snprintf(output_file, sizeof(output_file), "%s.i", argv[1]);
+    snprintf(output_file, sizeof(output_file), "%s.i", input_file);
 
     preprocess(argv[1], output_file);
 
