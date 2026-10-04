@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include "macro_handler.h"
 
 #define MAX_MACROS 100
 #define MAX_NAME 50
 #define MAX_VALUE 200
+#define MAX_LINE 500
 
 typedef struct
 {
@@ -88,7 +88,113 @@ static void store_macro(char *line)
     macro_count++;
 }
 
-static void replace_text(char *line)
+static void replace_parameter(char *text,
+                              const char *parameter,
+                              const char *argument)
+{
+    char result[MAX_VALUE];
+    char *pos;
+    int length = 0;
+
+    result[0] = '\0';
+
+    while ((pos = strstr(text, parameter)) != NULL)
+    {
+        int prefix_length = pos - text;
+
+        if (length + prefix_length + strlen(argument) >= MAX_VALUE - 1)
+            return;
+
+        strncat(result, text, prefix_length);
+        strcat(result, argument);
+
+        text = pos + strlen(parameter);
+        length = strlen(result);
+    }
+
+    strcat(result, text);
+    strcpy(text, result);
+}
+
+static void replace_function_macro(char *line, Macro *macro)
+{
+    char *pos;
+
+    while ((pos = strstr(line, macro->name)) != NULL)
+    {
+        char *open;
+        char *close;
+        char argument[MAX_VALUE];
+        char expanded[MAX_VALUE];
+        char new_line[MAX_LINE];
+
+        open = pos + strlen(macro->name);
+
+        if (*open != '(')
+            break;
+
+        close = strchr(open, ')');
+
+        if (close == NULL)
+            break;
+
+        strncpy(argument, open + 1, close - open - 1);
+        argument[close - open - 1] = '\0';
+
+        strcpy(expanded, macro->value);
+
+        replace_parameter(expanded,
+                          macro->parameter,
+                          argument);
+
+        snprintf(new_line,
+                 sizeof(new_line),
+                 "%.*s%s%s",
+                 (int)(pos - line),
+                 line,
+                 expanded,
+                 close + 1);
+
+        strcpy(line, new_line);
+    }
+}
+
+static void replace_simple_macro(char *line, Macro *macro)
+{
+    char *pos;
+
+    while ((pos = strstr(line, macro->name)) != NULL)
+    {
+        char before;
+        char after;
+        char new_line[MAX_LINE];
+
+        before = (pos == line) ? ' ' : *(pos - 1);
+        after = *(pos + strlen(macro->name));
+
+        if (!isalnum((unsigned char)before) &&
+            before != '_' &&
+            !isalnum((unsigned char)after) &&
+            after != '_')
+        {
+            snprintf(new_line,
+                     sizeof(new_line),
+                     "%.*s%s%s",
+                     (int)(pos - line),
+                     line,
+                     macro->value,
+                     pos + strlen(macro->name));
+
+            strcpy(line, new_line);
+        }
+        else
+        {
+            pos += strlen(macro->name);
+        }
+    }
+}
+
+static void replace_macros(char *line)
 {
     int i;
 
@@ -96,112 +202,11 @@ static void replace_text(char *line)
     {
         if (macros[i].is_function)
         {
-            char *pos = strstr(line, macros[i].name);
-
-            while (pos != NULL)
-            {
-                char *open = pos + strlen(macros[i].name);
-
-                if (*open != '(')
-                    break;
-
-                char *close = strchr(open, ')');
-
-                if (close == NULL)
-                    break;
-
-                char argument[MAX_VALUE];
-                char result[500];
-
-                int arg_length = close - open - 1;
-
-                strncpy(argument, open + 1, arg_length);
-                argument[arg_length] = '\0';
-
-                snprintf(result,
-                         sizeof(result),
-                         "%.*s%s%.*s%s%s",
-                         (int)(pos - line),
-                         line,
-                         macros[i].value,
-                         0,
-                         "",
-                         "",
-                         "");
-
-                char expanded[MAX_VALUE];
-
-                strcpy(expanded, macros[i].value);
-
-                char *param_pos =
-                    strstr(expanded, macros[i].parameter);
-
-                if (param_pos != NULL)
-                {
-                    char temp[MAX_VALUE];
-
-                    snprintf(temp,
-                             sizeof(temp),
-                             "%.*s%s%s",
-                             (int)(param_pos - expanded),
-                             expanded,
-                             argument,
-                             param_pos + strlen(macros[i].parameter));
-
-                    strcpy(expanded, temp);
-                }
-
-                char new_line[500];
-
-                snprintf(new_line,
-                         sizeof(new_line),
-                         "%.*s%s%s",
-                         (int)(pos - line),
-                         line,
-                         expanded,
-                         close + 1);
-
-                strcpy(line, new_line);
-
-                pos = strstr(line, macros[i].name);
-            }
+            replace_function_macro(line, &macros[i]);
         }
         else
         {
-            char *pos = strstr(line, macros[i].name);
-
-            while (pos != NULL)
-            {
-                char before;
-                char after;
-
-                before = (pos == line) ? ' ' : *(pos - 1);
-                after = *(pos + strlen(macros[i].name));
-
-                if (!isalnum((unsigned char)before) &&
-                    before != '_' &&
-                    !isalnum((unsigned char)after) &&
-                    after != '_')
-                {
-                    char new_line[500];
-
-                    snprintf(new_line,
-                             sizeof(new_line),
-                             "%.*s%s%s",
-                             (int)(pos - line),
-                             line,
-                             macros[i].value,
-                             pos + strlen(macros[i].name));
-
-                    strcpy(line, new_line);
-                }
-                else
-                {
-                    pos += strlen(macros[i].name);
-                }
-
-                pos = strstr(pos, macros[i].name);
-            }
+            replace_simple_macro(line, &macros[i]);
         }
     }
 }
@@ -210,7 +215,7 @@ void process_macros(const char *input_file, const char *output_file)
 {
     FILE *fp_in;
     FILE *fp_out;
-    char line[500];
+    char line[MAX_LINE];
 
     fp_in = fopen(input_file, "r");
 
@@ -237,7 +242,7 @@ void process_macros(const char *input_file, const char *output_file)
         }
         else
         {
-            replace_text(line);
+            replace_macros(line);
             fputs(line, fp_out);
         }
     }
